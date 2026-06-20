@@ -9,6 +9,12 @@ import '../services/supabase_service.dart';
 import '../services/tts_service.dart';
 import '../utils/image_utils.dart';
 
+/// `camera_windows` does not implement `startImageStream` (frame-by-frame
+/// access), so on Windows desktop we fall back to polling `takePicture()`
+/// on a timer instead of subscribing to the raw image stream.
+bool get _isWindowsDesktop =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
 
@@ -25,6 +31,9 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isProcessingFrame = false;
   DateTime _lastFrameProcessedTime = DateTime.now();
   static const int _frameIntervalMs = 300; // ~3.3 frames per second - optimal speed/bandwidth balance
+
+  // Windows-only: polling timer used instead of startImageStream (see note above)
+  Timer? _captureTimer;
   
   // Translation state
   String _currentPrediction = '';
@@ -84,15 +93,25 @@ class _CameraScreenState extends State<CameraScreen> {
 
   void _startFrameStream() {
     if (_controller == null || !_controller!.value.isInitialized) return;
-    
+
     setState(() {
       _isStreaming = true;
     });
 
+    if (_isWindowsDesktop) {
+      // camera_windows doesn't implement startImageStream, so poll
+      // takePicture() on a timer instead.
+      _startWindowsPolling();
+    } else {
+      _startMobileImageStream();
+    }
+  }
+
+  void _startMobileImageStream() {
     _controller!.startImageStream((CameraImage image) async {
       // 1. Throttle frame rate (skip frames to avoid overloading API)
       final now = DateTime.now();
-      if (_isProcessingFrame || 
+      if (_isProcessingFrame ||
           now.difference(_lastFrameProcessedTime).inMilliseconds < _frameIntervalMs) {
         return;
       }
@@ -103,7 +122,7 @@ class _CameraScreenState extends State<CameraScreen> {
       try {
         // 2. Convert CameraImage to compressed JPEG bytes directly (optimized downsampling)
         final jpegBytes = ImageUtils.convertCameraImageToJpeg(image);
-        
+
         if (jpegBytes.isEmpty || !mounted) {
           _isProcessingFrame = false;
           return;
@@ -114,31 +133,7 @@ class _CameraScreenState extends State<CameraScreen> {
         final result = await apiService.predictFrame(jpegBytes);
 
         if (!mounted) return;
-
-        setState(() {
-          _handDetected = result.handDetected;
-          _currentConfidence = result.confidence;
-          
-          if (result.gesture != null) {
-            _currentPrediction = result.gesture!;
-            
-            // Check if this is a newly stabilized gesture (prevents multiple triggers of the same word)
-            if (_currentPrediction != _lastConfirmedGesture) {
-              _lastConfirmedGesture = _currentPrediction;
-              _detectedWords.add(_currentPrediction);
-              
-              // 4. Speak aloud using Text-to-Speech if not muted
-              if (!_isMuted) {
-                final ttsService = Provider.of<TtsService>(context, listen: false);
-                ttsService.speak(_currentPrediction);
-              }
-            }
-          } else {
-            // No gesture detected (hand not present or low confidence)
-            _currentPrediction = '';
-            _lastConfirmedGesture = '';
-          }
-        });
+        _handlePredictionResult(result);
       } catch (e) {
         debugPrint("Error streaming camera frame: $e");
       } finally {
@@ -147,7 +142,76 @@ class _CameraScreenState extends State<CameraScreen> {
     });
   }
 
+  /// Windows fallback: `camera_windows` doesn't support `startImageStream`,
+  /// so instead we snap a still photo on a timer. `takePicture()` already
+  /// returns a JPEG-encoded file, so we skip ImageUtils entirely here.
+  void _startWindowsPolling() {
+    _captureTimer?.cancel();
+    _captureTimer = Timer.periodic(
+      const Duration(milliseconds: _frameIntervalMs),
+      (timer) async {
+        if (_isProcessingFrame ||
+            _controller == null ||
+            !_controller!.value.isInitialized ||
+            _controller!.value.isTakingPicture) {
+          return;
+        }
+
+        _isProcessingFrame = true;
+
+        try {
+          final xFile = await _controller!.takePicture();
+          final jpegBytes = await xFile.readAsBytes();
+
+          if (jpegBytes.isEmpty || !mounted) {
+            _isProcessingFrame = false;
+            return;
+          }
+
+          final apiService = Provider.of<ApiService>(context, listen: false);
+          final result = await apiService.predictFrame(jpegBytes);
+
+          if (!mounted) return;
+          _handlePredictionResult(result);
+        } catch (e) {
+          debugPrint("Error capturing/sending Windows frame: $e");
+        } finally {
+          _isProcessingFrame = false;
+        }
+      },
+    );
+  }
+
+  void _handlePredictionResult(PredictionResult result) {
+    setState(() {
+      _handDetected = result.handDetected;
+      _currentConfidence = result.confidence;
+
+      if (result.gesture != null) {
+        _currentPrediction = result.gesture!;
+
+        // Check if this is a newly stabilized gesture (prevents multiple triggers of the same word)
+        if (_currentPrediction != _lastConfirmedGesture) {
+          _lastConfirmedGesture = _currentPrediction;
+          _detectedWords.add(_currentPrediction);
+
+          // Speak aloud using Text-to-Speech if not muted
+          if (!_isMuted) {
+            final ttsService = Provider.of<TtsService>(context, listen: false);
+            ttsService.speak(_currentPrediction);
+          }
+        }
+      } else {
+        // No gesture detected (hand not present or low confidence)
+        _currentPrediction = '';
+        _lastConfirmedGesture = '';
+      }
+    });
+  }
+
   void _stopFrameStream() {
+    _captureTimer?.cancel();
+    _captureTimer = null;
     if (_controller != null && _controller!.value.isStreamingImages) {
       _controller!.stopImageStream();
     }
@@ -212,6 +276,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   void dispose() {
+    _captureTimer?.cancel();
     _stopFrameStream();
     _controller?.dispose();
     super.dispose();
