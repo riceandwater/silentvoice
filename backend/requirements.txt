@@ -1,0 +1,10 @@
+fastapi>=0.100.0
+uvicorn>=0.22.0
+mediapipe==0.10.35
+opencv-python==4.13.0.92
+scikit-learn>=1.2.2
+supabase>=1.0.3
+python-dotenv>=1.0.0
+pydantic>=2.0
+python-multipart>=0.0.6
+pandas>=2.0.0
