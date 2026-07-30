@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 class PredictionResult {
   final String? gesture;
@@ -33,12 +34,15 @@ class PredictionResult {
 class ApiService extends ChangeNotifier {
   // Default URL is 10.0.2.2 for Android emulator to connect to localhost of host machine
   // Or localhost for iOS Simulator or web
-  String _baseUrl = (kIsWeb ||
-          defaultTargetPlatform == TargetPlatform.windows ||
-          defaultTargetPlatform == TargetPlatform.macOS ||
-          defaultTargetPlatform == TargetPlatform.linux)
-      ? 'http://localhost:8000'
-      : 'http://10.0.2.2:8000';
+  //the FASTAPI conector
+  // Or localhost for iOS Simulator or web
+  String _baseUrl = (kIsWeb || 
+      defaultTargetPlatform == TargetPlatform.windows || 
+      defaultTargetPlatform == TargetPlatform.macOS || 
+      defaultTargetPlatform == TargetPlatform.linux)
+    ? 'https://gesture-api-service.salmonsky-9e942d8d.centralindia.azurecontainerapps.io'
+    : 'http://10.0.2.2:8000';
+
 
   bool _isConnecting = false;
   String? _errorMessage;
@@ -74,11 +78,12 @@ class ApiService extends ChangeNotifier {
           'file',
           jpegBytes,
           filename: 'frame.jpg',
+          contentType: MediaType('image', 'jpeg'),
         ),
       );
 
       final streamedResponse = await request.send().timeout(
-        const Duration(milliseconds: 1500),
+        const Duration(seconds: 5),
       );
       
       final response = await http.Response.fromStream(streamedResponse);

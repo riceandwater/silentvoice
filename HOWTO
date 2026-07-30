@@ -1,0 +1,22 @@
+cd C:\gesture-app\backend
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process 
+.\venv\Scripts\Activate.ps1
+python collect_data.py --gesture "thumbs_up" --samples 400
+python train.py
+
+
+cd C:\gesture-app
+docker build -t serishaawale/gesture-backend:v1 ./backend
+docker push serishaawale/gesture-backend:v1
+
+
+
+class ApiService extends ChangeNotifier {
+  // Default URL is 10.0.2.2 for Android emulator to connect to localhost of host machine
+  // Or localhost for iOS Simulator or web
+  String _baseUrl = (kIsWeb || 
+      defaultTargetPlatform == TargetPlatform.windows || 
+      defaultTargetPlatform == TargetPlatform.macOS || 
+      defaultTargetPlatform == TargetPlatform.linux)
+    ? 'http://localhost:8000'
+    : 'http://10.0.2.2:8000';

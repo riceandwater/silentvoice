@@ -1,6 +1,6 @@
 fastapi>=0.100.0
 uvicorn>=0.22.0
-mediapipe==0.10.35
+mediapipe==0.10.14
 opencv-python==4.13.0.92
 scikit-learn>=1.2.2
 supabase>=1.0.3

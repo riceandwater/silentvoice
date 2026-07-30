@@ -129,8 +129,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final supabaseService = Provider.of<SupabaseService>(context);
     final user = supabaseService.currentUser;
-    final userName = user?.email?.split('@').first ?? 'Developer';
-    
+final userName = (user?.email?.isNotEmpty ?? false)
+    ? user!.email!.split('@').first
+    : 'Guest';
+
     return Scaffold(
       backgroundColor: const Color(0xFF0F0C20), // Rich Google Meet Dark Theme
       appBar: AppBar(
@@ -171,7 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 radius: 18,
                 backgroundColor: const Color(0xFF6C63FF).withOpacity(0.3),
                 child: Text(
-                  userName.substring(0, 1).toUpperCase(),
+                 userName.isEmpty ? 'G' : userName[0].toUpperCase(),
                   style: GoogleFonts.outfit(
                     color: const Color(0xFF8C86FF),
                     fontWeight: FontWeight.bold,
@@ -184,7 +186,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   value: 'user_info',
                   enabled: false,
                   child: Text(
-                    user?.email ?? 'Demo Mode',
+                    user?.email ?? 'Anonymous User',
                     style: const TextStyle(color: Colors.white60, fontSize: 13),
                   ),
                 ),

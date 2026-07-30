@@ -30,7 +30,7 @@ class _CameraScreenState extends State<CameraScreen> {
   // Frame rate throttling variables
   bool _isProcessingFrame = false;
   DateTime _lastFrameProcessedTime = DateTime.now();
-  static const int _frameIntervalMs = 300; // ~3.3 frames per second - optimal speed/bandwidth balance
+  static const int _frameIntervalMs = 500; // ~2 fps - tuned for takePicture()-based capture on Windows
 
   // Windows-only: polling timer used instead of startImageStream (see note above)
   Timer? _captureTimer;
@@ -41,6 +41,13 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _handDetected = false;
   final List<String> _detectedWords = [];
   String _lastConfirmedGesture = '';
+
+  // Stability buffer: require the same raw label twice in a row before
+  // accepting it, to reduce flicker on single-frame (no-motion-context)
+  // classification — especially for gestures that involve motion (e.g. a wave).
+  String? _pendingLabel;
+  int _pendingLabelCount = 0;
+  static const int _requiredStableCount = 1; // TEMP: lowered for debugging — raise back to 2+ once confidence issue is confirmed fixed
   
   // UI States
   bool _isMuted = false;
@@ -160,14 +167,19 @@ class _CameraScreenState extends State<CameraScreen> {
         _isProcessingFrame = true;
 
         try {
-          final xFile = await _controller!.takePicture();
-          final jpegBytes = await xFile.readAsBytes();
+         final xFile = await _controller!.takePicture();
+
+if (!mounted) return;
+
+final jpegBytes = await xFile.readAsBytes();
+
+if (!mounted) return;
 
           if (jpegBytes.isEmpty || !mounted) {
             _isProcessingFrame = false;
             return;
           }
-
+          if (!mounted) return;
           final apiService = Provider.of<ApiService>(context, listen: false);
           final result = await apiService.predictFrame(jpegBytes);
 
@@ -182,46 +194,78 @@ class _CameraScreenState extends State<CameraScreen> {
     );
   }
 
+  /// Converts a raw model label like "thank_you" into "thank you" for
+  /// display and speech.
+  String _formatLabel(String rawLabel) => rawLabel.replaceAll('_', ' ');
+
   void _handlePredictionResult(PredictionResult result) {
     setState(() {
       _handDetected = result.handDetected;
       _currentConfidence = result.confidence;
 
-      if (result.gesture != null) {
-        _currentPrediction = result.gesture!;
+      final rawLabel = result.gesture;
 
-        // Check if this is a newly stabilized gesture (prevents multiple triggers of the same word)
-        if (_currentPrediction != _lastConfirmedGesture) {
-          _lastConfirmedGesture = _currentPrediction;
-          _detectedWords.add(_currentPrediction);
-
-          // Speak aloud using Text-to-Speech if not muted
-          if (!_isMuted) {
-            final ttsService = Provider.of<TtsService>(context, listen: false);
-            ttsService.speak(_currentPrediction);
-          }
-        }
-      } else {
-        // No gesture detected (hand not present or low confidence)
+      if (rawLabel == null) {
+        // No confident gesture this frame — reset the stability buffer too,
+        // so a brief drop-out doesn't carry over stale state.
+        _pendingLabel = null;
+        _pendingLabelCount = 0;
         _currentPrediction = '';
         _lastConfirmedGesture = '';
+        return;
+      }
+
+      // Stability gate: only accept a label once it's been predicted
+      // _requiredStableCount times in a row. This filters out the
+      // single-frame flicker you get from motion-based gestures (e.g. a
+      // wave passing through poses that resemble other static gestures).
+      if (rawLabel == _pendingLabel) {
+        _pendingLabelCount++;
+      } else {
+        _pendingLabel = rawLabel;
+        _pendingLabelCount = 1;
+      }
+
+      if (_pendingLabelCount < _requiredStableCount) {
+        return; // Not stable yet — don't update the displayed/spoken word.
+      }
+
+      final displayLabel = _formatLabel(rawLabel);
+      _currentPrediction = displayLabel;
+
+      // Prevents multiple triggers of the same word while it's still held.
+      if (rawLabel != _lastConfirmedGesture) {
+        _lastConfirmedGesture = rawLabel;
+        _detectedWords.add(displayLabel);
+
+        // Speak aloud using Text-to-Speech if not muted
+        if (!_isMuted) {
+          final ttsService = Provider.of<TtsService>(context, listen: false);
+          ttsService.speak(displayLabel);
+        }
       }
     });
   }
+void _stopFrameStream() {
+  _captureTimer?.cancel();
+  _captureTimer = null;
 
-  void _stopFrameStream() {
-    _captureTimer?.cancel();
-    _captureTimer = null;
-    if (_controller != null && _controller!.value.isStreamingImages) {
-      _controller!.stopImageStream();
-    }
-    setState(() {
-      _isStreaming = false;
-      _currentPrediction = '';
-      _handDetected = false;
-    });
+  if (_controller != null &&
+      _controller!.value.isStreamingImages) {
+    _controller!.stopImageStream();
   }
 
+  _pendingLabel = null;
+  _pendingLabelCount = 0;
+
+  _isStreaming = false;
+  _currentPrediction = '';
+  _handDetected = false;
+
+  if (mounted) {
+    setState(() {});
+  }
+}
   Future<void> _saveCurrentSession() async {
     if (_detectedWords.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -275,12 +319,18 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   @override
-  void dispose() {
-    _captureTimer?.cancel();
-    _stopFrameStream();
-    _controller?.dispose();
-    super.dispose();
+void dispose() {
+  _captureTimer?.cancel();
+
+  if (_controller != null) {
+    if (_controller!.value.isStreamingImages) {
+      _controller!.stopImageStream();
+    }
+    _controller!.dispose();
   }
+
+  super.dispose();
+}
 
   @override
   Widget build(BuildContext context) {

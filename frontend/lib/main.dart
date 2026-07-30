@@ -1,7 +1,8 @@
+
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/api_service.dart';
 import 'services/supabase_service.dart';
 import 'services/tts_service.dart';
@@ -16,13 +17,17 @@ void main() async {
   // without needing a Supabase project set up immediately.
   try {
     await Supabase.initialize(
-      url: 'https://placeholder-project.supabase.co', // Replace with your actual Supabase URL
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder-anon-key', // Replace with your actual Anon Key
+      url: 'https://eupylqnoiynliqafyiim.supabase.co', // Replace with your actual Supabase URL
+      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1cHlscW5vaXlubGlxYWZ5aWltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyMzkyOTksImV4cCI6MjEwMDgxNTI5OX0.X2xRsM-1t_hiDeolHJVPISJKkgiDqw_2p0EvJIukeiw', // Replace with your actual Anon Key
     );
-    debugPrint("Supabase initialized successfully.");
-  } catch (e) {
-    debugPrint("Supabase initialization bypassed/failed. App will default to Demo Mode.");
-  }
+    final supabase = Supabase.instance.client;
+
+     debugPrint("Supabase initialized");
+} catch (e, stackTrace) {
+  debugPrint("Supabase initialization failed:");
+  debugPrint(e.toString());
+  debugPrint(stackTrace.toString());
+}
 
   runApp(
     MultiProvider(
