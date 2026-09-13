@@ -66,7 +66,11 @@ def reload_model():
         "model_loaded": predictor.model is not None,
         "supported_labels": predictor.labels
     }
-
+@app.get("/")
+def root():
+    return {
+        "message": "SilentVoice API Running"
+    }
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
